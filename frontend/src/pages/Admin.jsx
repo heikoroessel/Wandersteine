@@ -106,7 +106,7 @@ export default function Admin({ user, onLogout }) {
             <div className="stat-label">{t('totalEntries')}</div>
           </div>
           <div className="stat-card">
-            <div className="stat-number">{80 - activeCount}</div>
+            <div className="stat-number">{stones.length}</div>
             <div className="stat-label">{t('inactive')}</div>
           </div>
         </div>
