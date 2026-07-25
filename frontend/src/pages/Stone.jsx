@@ -190,9 +190,32 @@ function AddEntryForm({ stoneNumber, onSuccess }) {
             </div>
             <div className="form-group">
               <label className="form-label">{t('fieldLocation')} <span className="required">*</span></label>
-              <button type="button" className="gps-btn" onClick={getGPS}>{t('gpsButton')}</button>
+              <button type="button" className="gps-btn" onClick={getGPS}
+                style={{
+                  background:'var(--sage)',
+                  color:'var(--white)',
+                  border:'2px solid var(--sage-dark)',
+                  borderRadius:'6px',
+                  padding:'14px 18px',
+                  fontSize:'16px',
+                  fontWeight:600,
+                  width:'100%',
+                  cursor:'pointer',
+                  boxShadow:'0 2px 8px rgba(74,89,64,0.28)'
+                }}>
+                {t('gpsButton')}
+              </button>
+              <p style={{
+                fontSize:'13px',
+                color:'var(--sage-dark)',
+                marginTop:'8px',
+                marginBottom:'0',
+                lineHeight:'1.5'
+              }}>
+                {t('gpsHint')}
+              </p>
               {gpsStatus && <p className="gps-status">{gpsStatus}</p>}
-              <input className="input-field" style={{width:'100%',marginTop:'8px'}} type="text" value={locationName} onChange={e=>setLocationName(e.target.value)} placeholder={t('fieldLocationPlaceholder')} />
+              <input className="input-field" style={{width:'100%',marginTop:'14px'}} type="text" value={locationName} onChange={e=>setLocationName(e.target.value)} placeholder={t('fieldLocationPlaceholder')} />
             </div>
             <div className="form-group">
               <label className="form-label">{t('fieldPhotos')} <span className="required">*</span></label>
