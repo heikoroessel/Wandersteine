@@ -29,6 +29,40 @@ const upload = multer({
   }
 });
 
+// --- Geocoding -------------------------------------------------------------
+// Turn a typed place name (e.g. "Café am Marktplatz, Wien") into coordinates
+// using OpenStreetMap's free Nominatim service. Fully defensive: any failure
+// (not found, service down, timeout) simply returns null so that saving an
+// entry NEVER depends on geocoding succeeding.
+async function geocode(placeName) {
+  if (!placeName || !placeName.trim()) return null;
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    const url = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&q='
+      + encodeURIComponent(placeName.trim());
+    const resp = await fetch(url, {
+      headers: {
+        // Nominatim requires an identifying User-Agent
+        'User-Agent': 'Wandersteine/1.0 (Hochzeits-App Rieke & Leo)'
+      },
+      signal: controller.signal
+    });
+    clearTimeout(timeout);
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    if (Array.isArray(data) && data.length > 0) {
+      const lat = parseFloat(data[0].lat);
+      const lon = parseFloat(data[0].lon);
+      if (!Number.isNaN(lat) && !Number.isNaN(lon)) return { lat, lon };
+    }
+    return null;
+  } catch (err) {
+    console.error('Geocoding failed:', err && err.message);
+    return null;
+  }
+}
+
 // GET /api/stones/:number - Get stone with all entries
 router.get('/:number', async (req, res) => {
   try {
@@ -88,6 +122,19 @@ router.post('/:number/entries', upload.array('photos', 5), async (req, res) => {
       return res.status(404).json({ error: 'Stone not found' });
     }
 
+    // Determine coordinates: prefer GPS from the browser; if none was sent
+    // but a location name was typed, try to derive coordinates from it.
+    // This happens BEFORE the DB transaction, and a failure just leaves the
+    // coordinates empty — the entry is still saved either way.
+    let lat = latitude ? parseFloat(latitude) : null;
+    let lng = longitude ? parseFloat(longitude) : null;
+    if (lat === null || Number.isNaN(lat)) lat = null;
+    if (lng === null || Number.isNaN(lng)) lng = null;
+    if (lat === null && location_name) {
+      const geo = await geocode(location_name);
+      if (geo) { lat = geo.lat; lng = geo.lon; }
+    }
+
     await client.query('BEGIN');
 
     // Activate stone on first entry
@@ -100,9 +147,7 @@ router.post('/:number/entries', upload.array('photos', 5), async (req, res) => {
     const entryResult = await client.query(
       `INSERT INTO entries (stone_number, name, message, location_name, latitude, longitude)
        VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-      [number, name, message || null, location_name || null,
-       latitude ? parseFloat(latitude) : null,
-       longitude ? parseFloat(longitude) : null]
+      [number, name, message || null, location_name || null, lat, lng]
     );
 
     const entry = entryResult.rows[0];
@@ -153,6 +198,52 @@ router.get('/', authenticate, async (req, res) => {
       ORDER BY s.number ASC
     `);
     res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// POST /api/stones/backfill-coordinates - Fill in missing coordinates for
+// existing entries by geocoding their typed location name (admin only).
+// Additive and safe: only touches rows that currently have NO coordinates
+// but DO have a location name. Never overwrites existing coordinates,
+// never deletes anything. Throttled to respect Nominatim's ~1 req/sec limit.
+router.post('/backfill-coordinates', authenticate, requireAdmin, async (req, res) => {
+  try {
+    const missing = await pool.query(
+      `SELECT id, location_name FROM entries
+       WHERE (latitude IS NULL OR longitude IS NULL)
+         AND location_name IS NOT NULL
+         AND location_name <> ''
+       ORDER BY id ASC`
+    );
+
+    let updated = 0;
+    const failedNames = [];
+
+    for (const row of missing.rows) {
+      const geo = await geocode(row.location_name);
+      if (geo) {
+        await pool.query(
+          'UPDATE entries SET latitude = $1, longitude = $2 WHERE id = $3',
+          [geo.lat, geo.lon, row.id]
+        );
+        updated++;
+      } else {
+        failedNames.push(row.location_name);
+      }
+      // Respect Nominatim usage policy: max ~1 request per second
+      await new Promise(r => setTimeout(r, 1100));
+    }
+
+    res.json({
+      success: true,
+      total: missing.rows.length,
+      updated,
+      failed: failedNames.length,
+      failedNames
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Server error' });
