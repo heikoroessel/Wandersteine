@@ -62,9 +62,56 @@ function StoneMap({ entries }) {
   );
 }
 
-function EntryCard({ entry, isAdmin, onDelete }) {
+function EntryCard({ entry, isAdmin, onDelete, onUpdateCoords }) {
   const [lightbox, setLightbox] = useState(null);
   const photos = Array.isArray(entry.photos) ? entry.photos.filter(Boolean) : [];
+
+  const [editing, setEditing] = useState(false);
+  const [coordInput, setCoordInput] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [coordErr, setCoordErr] = useState('');
+
+  const parseCoords = (str) => {
+    const parts = str.split(',').map(s => s.trim());
+    if (parts.length !== 2) return null;
+    const lat = parseFloat(parts[0]);
+    const lng = parseFloat(parts[1]);
+    if (Number.isNaN(lat) || Number.isNaN(lng)) return null;
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+    return { lat, lng };
+  };
+
+  const startEdit = () => {
+    setCoordInput(entry.latitude && entry.longitude ? `${entry.latitude}, ${entry.longitude}` : '');
+    setCoordErr('');
+    setEditing(true);
+  };
+
+  const saveCoords = async () => {
+    const c = parseCoords(coordInput);
+    if (!c) { setCoordErr('Bitte im Format "49.1234, 8.5678" eingeben.'); return; }
+    setSaving(true); setCoordErr('');
+    try {
+      await onUpdateCoords(entry.id, c.lat, c.lng);
+      setEditing(false);
+    } catch {
+      setCoordErr('Speichern fehlgeschlagen.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const removePin = async () => {
+    setSaving(true); setCoordErr('');
+    try {
+      await onUpdateCoords(entry.id, null, null);
+      setEditing(false);
+    } catch {
+      setCoordErr('Entfernen fehlgeschlagen.');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <div className="entry-card">
@@ -86,6 +133,47 @@ function EntryCard({ entry, isAdmin, onDelete }) {
           📍 {entry.location_name || `${parseFloat(entry.latitude).toFixed(4)}, ${parseFloat(entry.longitude).toFixed(4)}`}
         </div>
       )}
+
+      {isAdmin && (
+        <div style={{marginTop:8,fontSize:13}}>
+          {!editing ? (
+            <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap',color:'var(--stone)'}}>
+              <span>
+                Koordinaten:{' '}
+                {entry.latitude && entry.longitude
+                  ? `${parseFloat(entry.latitude).toFixed(5)}, ${parseFloat(entry.longitude).toFixed(5)}`
+                  : 'kein Pin'}
+              </span>
+              <button type="button" onClick={startEdit}
+                style={{background:'none',border:'1px solid var(--sage-light)',borderRadius:4,padding:'2px 8px',color:'var(--sage-dark)',cursor:'pointer',fontSize:12}}>
+                ✏️ Koordinaten bearbeiten
+              </button>
+            </div>
+          ) : (
+            <div style={{display:'flex',flexDirection:'column',gap:6,maxWidth:380}}>
+              <input type="text" value={coordInput} onChange={e=>setCoordInput(e.target.value)}
+                placeholder="z.B. 49.1234, 8.5678 (aus Google Maps)"
+                style={{padding:'8px 10px',border:'1px solid var(--sage-light)',borderRadius:4,fontSize:13,width:'100%'}} />
+              {coordErr && <span style={{color:'#DC2626'}}>{coordErr}</span>}
+              <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+                <button type="button" disabled={saving} onClick={saveCoords}
+                  style={{background:'var(--sage)',color:'var(--white)',border:'none',borderRadius:4,padding:'6px 12px',cursor:'pointer',fontSize:13}}>
+                  {saving ? 'Speichern…' : 'Speichern'}
+                </button>
+                <button type="button" disabled={saving} onClick={removePin}
+                  style={{background:'none',color:'#DC2626',border:'1px solid #FECACA',borderRadius:4,padding:'6px 12px',cursor:'pointer',fontSize:13}}>
+                  Pin entfernen
+                </button>
+                <button type="button" disabled={saving} onClick={()=>{setEditing(false);setCoordErr('');}}
+                  style={{background:'none',color:'var(--stone)',border:'1px solid var(--cream-dark)',borderRadius:4,padding:'6px 12px',cursor:'pointer',fontSize:13}}>
+                  Abbrechen
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {entry.message && <p className="entry-message">{entry.message}</p>}
       {photos.length > 0 && (
         <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(100px,120px))',gap:'8px',marginTop:'16px'}}>
@@ -288,6 +376,11 @@ export default function StonePage() {
     }
   };
 
+  const updateCoords = async (entryId, latitude, longitude) => {
+    await api.put(`/stones/entries/${entryId}/coordinates`, { latitude, longitude });
+    await loadStone();
+  };
+
   useEffect(() => { loadStone(); }, [number]);
 
   const handleSuccess = () => {
@@ -342,7 +435,7 @@ export default function StonePage() {
           {entries.length === 0 ? (
             <div className="empty-state"><p>{t('stoneFirstEntry')}</p></div>
           ) : (
-            entries.map(entry => <EntryCard key={entry.id} entry={entry} isAdmin={isAdmin} onDelete={deleteEntry} />)
+            entries.map(entry => <EntryCard key={entry.id} entry={entry} isAdmin={isAdmin} onDelete={deleteEntry} onUpdateCoords={updateCoords} />)
           )}
           {!showForm && (
             <div style={{textAlign:'center',marginTop:32}}>
