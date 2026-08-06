@@ -22,7 +22,11 @@ export default function Admin({ user, onLogout }) {
   const [stones, setStones] = useState([]);
   const [loading, setLoading] = useState(true);
   const [stoneDetails, setStoneDetails] = useState({});
+  const [backfilling, setBackfilling] = useState(false);
+  const [backfillMsg, setBackfillMsg] = useState('');
   const navigate = useNavigate();
+
+  const isAdmin = (user?.role || localStorage.getItem('role')) === 'admin';
 
   useEffect(() => {
     loadStones();
@@ -61,6 +65,31 @@ export default function Admin({ user, onLogout }) {
     localStorage.removeItem('username');
     onLogout();
     navigate('/');
+  };
+
+  // Fill in missing coordinates for old entries by geocoding their location name
+  const handleBackfill = async () => {
+    if (!window.confirm('Fehlende Koordinaten jetzt aus den Ortsnamen nachtragen?\n\nDas kann bei vielen Einträgen ein bis zwei Minuten dauern. Bestehende Koordinaten werden nicht verändert.')) return;
+    setBackfilling(true);
+    setBackfillMsg('');
+    try {
+      const res = await api.post('/stones/backfill-coordinates');
+      const { total = 0, updated = 0, failed = 0, failedNames = [] } = res.data || {};
+      let msg = `✓ ${updated} von ${total} Einträgen ergänzt.`;
+      if (failed > 0) {
+        msg += ` ${failed} nicht gefunden`;
+        if (failedNames.length) msg += `: ${failedNames.join(', ')}`;
+        msg += '.';
+      }
+      setBackfillMsg(msg);
+      // Refresh map + table so the newly placed stones appear
+      setStoneDetails({});
+      loadStones();
+    } catch (err) {
+      setBackfillMsg('Fehler beim Nachtragen. Bitte später erneut versuchen.');
+    } finally {
+      setBackfilling(false);
+    }
   };
 
   const activeCount = stones.filter(s => s.status === 'active').length;
@@ -110,6 +139,23 @@ export default function Admin({ user, onLogout }) {
             <div className="stat-label">{t('inactive')}</div>
           </div>
         </div>
+
+        {/* Admin tools */}
+        {isAdmin && (
+          <div style={{ marginBottom: 32, display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 12 }}>
+            <button
+              className="btn-primary"
+              onClick={handleBackfill}
+              disabled={backfilling}
+              style={{ background: 'var(--sage)', color: 'var(--white)', opacity: backfilling ? 0.7 : 1 }}
+            >
+              {backfilling ? 'Wird nachgetragen…' : '📍 Fehlende Koordinaten nachtragen'}
+            </button>
+            {backfillMsg && (
+              <span style={{ fontSize: 14, color: 'var(--sage-dark)', lineHeight: 1.5 }}>{backfillMsg}</span>
+            )}
+          </div>
+        )}
 
         {/* World map */}
         {allPaths.length > 0 && (
