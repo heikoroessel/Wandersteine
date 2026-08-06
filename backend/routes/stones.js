@@ -250,6 +250,44 @@ router.post('/backfill-coordinates', authenticate, requireAdmin, async (req, res
   }
 });
 
+// PUT /api/stones/entries/:id/coordinates - manually set or clear an entry's
+// coordinates (admin only). Send { latitude, longitude } to set a pin, or
+// { latitude: null, longitude: null } (or empty strings) to remove the pin.
+router.put('/entries/:id/coordinates', authenticate, requireAdmin, async (req, res) => {
+  try {
+    const { latitude, longitude } = req.body;
+
+    const isEmpty = (v) => v === null || v === undefined || v === '';
+    let lat = isEmpty(latitude) ? null : parseFloat(latitude);
+    let lng = isEmpty(longitude) ? null : parseFloat(longitude);
+
+    // Either both coordinates are set, or both are cleared
+    if ((lat === null) !== (lng === null)) {
+      return res.status(400).json({ error: 'Latitude and longitude must both be set or both empty' });
+    }
+    if (lat !== null) {
+      if (Number.isNaN(lat) || Number.isNaN(lng)) {
+        return res.status(400).json({ error: 'Coordinates must be numbers' });
+      }
+      if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+        return res.status(400).json({ error: 'Coordinates out of range' });
+      }
+    }
+
+    const result = await pool.query(
+      'UPDATE entries SET latitude = $1, longitude = $2 WHERE id = $3 RETURNING id, latitude, longitude',
+      [lat, lng, req.params.id]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Entry not found' });
+    }
+    res.json({ success: true, entry: result.rows[0] });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // DELETE entry (admin only)
 router.delete('/entries/:id', authenticate, requireAdmin, async (req, res) => {
   try {
